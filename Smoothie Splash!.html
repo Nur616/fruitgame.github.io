@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smoothie Splash!</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<style>
+:root{--bg1:#ffe29f;--bg2:#ff9a8b;--bg3:#ff5f7e;--card:rgba(255,255,255,.94);--ink:#4a1d3d;--muted:#8a5a7a;--pill:rgba(255,255,255,.85);
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg1:#4a1f55;--bg2:#8a2b5d;--bg3:#c2410c;--card:rgba(40,16,44,.94);--ink:#ffe8f0;--muted:#e5b3cc;--pill:rgba(40,16,44,.8)}}
+:root[data-theme="dark"]{--bg1:#4a1f55;--bg2:#8a2b5d;--bg3:#c2410c;--card:rgba(40,16,44,.94);--ink:#ffe8f0;--muted:#e5b3cc;--pill:rgba(40,16,44,.8)}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+  font-family:ui-rounded,"Trebuchet MS",system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
+body{background:linear-gradient(160deg,var(--bg1),var(--bg2) 55%,var(--bg3))}
+.card{background:var(--card);color:var(--ink)}
+.btn{background:linear-gradient(180deg,#ff8a5c,#ff4d6d);box-shadow:0 6px 0 #c9304f,0 10px 20px rgba(201,48,79,.35);transition:transform .08s,box-shadow .08s}
+.btn:active{transform:translateY(5px);box-shadow:0 1px 0 #c9304f}
+.hidden{display:none!important}
+@keyframes pop{0%{transform:scale(.7);opacity:0}70%{transform:scale(1.06)}100%{transform:scale(1);opacity:1}}
+.pop{animation:pop .35s ease-out}
+@media (prefers-reduced-motion:reduce){.pop,.animate-bounce{animation:none}}
+</style>
+</head>
+<body>
+<main id="stage" class="relative mx-auto h-full w-full max-w-[480px] overflow-hidden">
+  <canvas id="cv" class="absolute inset-0 h-full w-full"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="pointer-events-none absolute inset-x-0 top-0 hidden items-center justify-between gap-2 p-3">
+    <div class="rounded-full px-4 py-1.5 text-lg font-extrabold shadow" style="background:var(--pill)">🍹 <span id="score">0</span></div>
+    <div id="lives" class="rounded-full px-3 py-1.5 text-lg shadow" style="background:var(--pill)"></div>
+    <div class="rounded-full px-4 py-1.5 text-lg font-extrabold shadow" style="background:var(--pill)">⚡ <span id="time">1.0</span>x</div>
+  </div>
+
+  <!-- Start -->
+  <section id="start" class="absolute inset-0 flex items-center justify-center p-5">
+    <div class="card pop w-full rounded-[2rem] p-7 text-center shadow-2xl">
+      <div class="mb-2 flex justify-center gap-2 text-4xl"><span class="animate-bounce">🍓</span><span class="animate-bounce" style="animation-delay:.15s">🥭</span><span class="animate-bounce" style="animation-delay:.3s">🍌</span><span class="animate-bounce" style="animation-delay:.45s">🫐</span></div>
+      <h1 class="text-5xl font-black leading-none tracking-tight" style="color:#ff4d6d">Smoothie<br>Splash!</h1>
+      <p class="mx-auto mt-4 max-w-[16rem] text-lg font-semibold">Catch the fresh fruit, dodge the junk!</p>
+      <p class="mt-2 text-sm" style="color:var(--muted)">Drag to move the blender. 3 lives, endless play, and it keeps getting faster. Avoid rotten fruit 🟤, chili 🌶️ and wrappers 🛍️.</p>
+      <button id="play" class="btn mt-6 w-full rounded-full py-4 text-2xl font-black text-white">Play Now</button>
+    </div>
+  </section>
+
+  <!-- Game over -->
+  <section id="over" class="absolute inset-0 hidden items-center justify-center p-5">
+    <div class="card w-full rounded-[2rem] p-7 text-center shadow-2xl">
+      <p id="why" class="text-sm font-bold" style="color:var(--muted)"></p>
+      <h2 id="rank" class="mt-1 text-4xl font-black leading-tight" style="color:#ff4d6d"></h2>
+      <p class="mt-3 text-lg font-semibold">Final score</p>
+      <p id="final" class="text-6xl font-black">0</p>
+      <button id="again" class="btn mt-5 w-full rounded-full py-3.5 text-xl font-black text-white">Play Again</button>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), cv = $('cv'), ctx = cv.getContext('2d');
+  let W = 0, H = 0, u = 1;
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = stage.clientWidth; H = stage.clientHeight; u = Math.min(W / 360, H / 640);
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cupX = Math.min(Math.max(cupX, 0), W); target = cupX;
+  }
+
+  const GOOD = [{e:'🍓',c:'#ff4d6d'},{e:'🫐',c:'#6c63ff'},{e:'🥭',c:'#ffb703'},{e:'🍌',c:'#ffe066'}];
+  const BAD = ['rotten','🌶️','🛍️'];
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  let state = 'start', score, lives, elapsed, items, parts, floats, spawnT, flash, shake, cupX = 0, target = 0, juice = '#ff9ec0', last = 0;
+
+  function reset() {
+    score = 0; lives = 3; elapsed = 0; items = []; parts = []; floats = [];
+    spawnT = 0.4; flash = 0; shake = 0; juice = '#ff9ec0'; cupX = target = W / 2;
+    $('score').textContent = 0; $('time').textContent = '1.0'; renderLives();
+  }
+  function renderLives() {
+    $('lives').textContent = '❤️'.repeat(lives) + '🖤'.repeat(3 - lives);
+  }
+  function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
+
+  function start() {
+    reset(); state = 'play';
+    $('start').classList.add('hidden'); $('start').classList.remove('flex');
+    $('over').classList.add('hidden'); $('over').classList.remove('flex');
+    $('hud').classList.remove('hidden'); $('hud').classList.add('flex');
+    last = performance.now();
+  }
+
+  function end(reason) {
+    state = 'over';
+    $('hud').classList.add('hidden'); $('hud').classList.remove('flex');
+    const rank = score >= 600 ? 'Master Mixologist!' : score >= 350 ? 'Fresh Blend Pro!' : score >= 150 ? 'Juicy Apprentice!' : 'Too much pulp!';
+    $('rank').textContent = rank;
+    $('why').textContent = 'Out of lives! You lasted ' + Math.floor(elapsed) + 's';
+    $('final').textContent = score;
+    $('over').classList.remove('hidden'); $('over').classList.add('flex');
+    const c = $('over').firstElementChild; c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
+  }
+
+  function spawn() {
+    const bad = Math.random() < Math.min(0.5, 0.3 + elapsed * 0.002), mul = Math.min(3.2, 1 + elapsed * 0.02);
+    const r = 22 * u;
+    const type = bad ? BAD[Math.floor(Math.random() * BAD.length)] : GOOD[Math.floor(Math.random() * GOOD.length)];
+    items.push({ x: rand(r, W - r), y: -r, r, vy: rand(150, 300) * mul * (H / 640), rot: rand(0, 6), vr: rand(-2.5, 2.5), bad, type });
+  }
+
+  function burst(x, y, color, n, scale) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), s = rand(60, 220) * scale;
+      parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 80, life: rand(.35, .7), max: .7, r: rand(2, 5) * u, color });
+    }
+  }
+  function floatText(x, y, t, color) { floats.push({ x, y, t, color, life: .8 }); }
+
+  const cupW = () => 84 * u, cupH = () => 96 * u, cupTop = () => H - cupH() - 26 * u;
+
+  function update(dt) {
+    cupX += (target - cupX) * Math.min(1, dt * 18);
+    elapsed += dt;
+    $('time').textContent = Math.min(3.2, 1 + elapsed * 0.02).toFixed(1);
+    spawnT -= dt;
+    if (spawnT <= 0) { spawn(); spawnT = rand(.35, .8) / Math.min(2.2, 1 + elapsed * 0.01); }
+    const top = cupTop(), halfW = cupW() / 2;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      it.y += it.vy * dt; it.rot += it.vr * dt;
+      if (it.y + it.r * .6 > top && it.y < top + cupH() * .45 && Math.abs(it.x - cupX) < halfW - 2 * u) {
+        items.splice(i, 1);
+        if (it.bad) {
+          lives--; score = Math.max(0, score - 5); flash = .35; shake = .3;
+          burst(it.x, top, '#6b4423', 10, 1); floatText(it.x, top - 10, '−5', '#ff3b3b'); buzz(120); renderLives();
+        } else {
+          score += 10; juice = it.type.c;
+          burst(it.x, top, it.type.c, 16, 1); floatText(it.x, top - 10, '+10', '#fff'); buzz(15);
+        }
+        $('score').textContent = score;
+        if (lives <= 0) { end('lives'); return; }
+      } else if (it.y > H + it.r) items.splice(i, 1);
+    }
+  }
+
+  function drawItem(it) {
+    ctx.save(); ctx.translate(it.x, it.y);
+    if (it.bad) {
+      const pulse = 1 + Math.sin(performance.now() / 120) * .08;
+      ctx.fillStyle = 'rgba(255,30,30,.32)'; ctx.beginPath(); ctx.arc(0, 0, it.r * 1.4 * pulse, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#ff2020'; ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.arc(0, 0, it.r * 1.4 * pulse, 0, 7); ctx.stroke();
+    }
+    ctx.rotate(it.rot);
+    if (it.type === 'rotten') {
+      ctx.fillStyle = '#6b4423'; ctx.beginPath(); ctx.arc(0, 0, it.r, 0, 7); ctx.fill();
+      ctx.fillStyle = '#3d2412';
+      [[-.4,-.2,.28],[.3,.25,.22],[.25,-.4,.16],[-.2,.45,.14]].forEach(s => { ctx.beginPath(); ctx.arc(s[0]*it.r, s[1]*it.r, s[2]*it.r, 0, 7); ctx.fill(); });
+      ctx.strokeStyle = '#4b7a2a'; ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.moveTo(0, -it.r); ctx.lineTo(4 * u, -it.r - 8 * u); ctx.stroke();
+    } else {
+      ctx.font = `${it.r * 1.7}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(it.type.e || it.type, 0, 2);
+    }
+    if (it.bad) {
+      ctx.rotate(-it.rot);
+      const bx = it.r * .95, by = -it.r * .95;
+      ctx.fillStyle = '#ff2020'; ctx.beginPath(); ctx.arc(bx, by, 9 * u, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5 * u; ctx.lineCap = 'round'; ctx.beginPath();
+      ctx.moveTo(bx - 4 * u, by - 4 * u); ctx.lineTo(bx + 4 * u, by + 4 * u);
+      ctx.moveTo(bx + 4 * u, by - 4 * u); ctx.lineTo(bx - 4 * u, by + 4 * u); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawCup() {
+    const w = cupW(), h = cupH(), t = cupTop(), x = cupX, tw = w / 2, bw = w * .38;
+    ctx.save();
+    ctx.translate((Math.random() - .5) * shake * 20, 0);
+    const path = () => { ctx.beginPath(); ctx.moveTo(x - tw, t); ctx.lineTo(x + tw, t); ctx.lineTo(x + bw, t + h); ctx.lineTo(x - bw, t + h); ctx.closePath(); };
+    path(); ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fill();
+    ctx.save(); path(); ctx.clip();
+    const lv = (.08 + ((score % 200) / 200) * .9) * h;
+    ctx.fillStyle = juice; ctx.fillRect(x - tw, t + h - lv, w, lv);
+    ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(x - tw, t + h - lv, w, 4 * u);
+    ctx.restore();
+    path(); ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 3 * u; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fillRect(x - tw * .7, t + 8 * u, 5 * u, h * .6);
+    ctx.fillStyle = '#4a1d3d'; ctx.beginPath(); ctx.roundRect(x - bw - 8 * u, t + h, 2 * bw + 16 * u, 16 * u, 6 * u); ctx.fill();
+    ctx.fillStyle = '#ff4d6d'; ctx.beginPath(); ctx.arc(x, t + h + 8 * u, 4 * u, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#4a1d3d'; ctx.lineWidth = 5 * u; ctx.beginPath(); ctx.moveTo(x + tw - 2 * u, t + 18 * u); ctx.quadraticCurveTo(x + tw + 22 * u, t + 30 * u, x + bw + 4 * u, t + h - 18 * u); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw(dt) {
+    ctx.clearRect(0, 0, W, H);
+    if (state === 'start') return;
+    items.forEach(drawItem);
+    drawCup();
+    parts.forEach(p => { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center'; ctx.font = `900 ${22 * u}px system-ui, sans-serif`;
+    floats.forEach(f => { ctx.globalAlpha = Math.max(0, f.life / .8); ctx.fillStyle = f.color; ctx.strokeStyle = 'rgba(74,29,61,.6)'; ctx.lineWidth = 4 * u; ctx.strokeText(f.t, f.x, f.y); ctx.fillText(f.t, f.x, f.y); });
+    ctx.globalAlpha = 1;
+    if (flash > 0) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, H); }
+  }
+
+  function tick(now) {
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    if (state === 'play') update(dt);
+    for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.life -= dt; p.vy += 600 * dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.life <= 0) parts.splice(i, 1); }
+    for (let i = floats.length - 1; i >= 0; i--) { const f = floats[i]; f.life -= dt; f.y -= 50 * dt; if (f.life <= 0) floats.splice(i, 1); }
+    flash = Math.max(0, flash - dt); shake = Math.max(0, shake - dt);
+    draw(dt);
+    requestAnimationFrame(tick);
+  }
+
+  function move(e) {
+    if (state !== 'play') return;
+    const r = stage.getBoundingClientRect();
+    const w = cupW() / 2;
+    target = Math.min(Math.max(e.clientX - r.left, w), W - w);
+  }
+
+  window.addEventListener('pointerdown', move);
+  window.addEventListener('pointermove', move);
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  $('play').addEventListener('click', start);
+  $('again').addEventListener('click', start);
+
+  items = []; parts = []; floats = [];
+  resize(); reset();
+  requestAnimationFrame(t => { last = t; tick(t); });
+})();
+</script>
+</body>
+</html>
